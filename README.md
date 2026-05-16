@@ -88,7 +88,11 @@ The post-cutover backtest cohort matched the pre-cutover cohort within ±0.01R p
 
 ## What's not in this repo
 
-The full strategy source, the tuned config, ~640 tests, the dashboard implementation, real trade history, the internal project brain, and roughly two years of accumulated tuning notes.
+**The tuned weights.** Six months of historical OHLCV across 25 pairs, fed through a walk-forward backtest harness, then put through a two-stage tuning pipeline — TPE for the wide search, CMA-ES for the refinement. The output is the set of numbers that actually drive the bot: the RR multiple, the per-symbol SL percentage, the soft factor weights, the score threshold, the BTC/ETH composite bias coefficients.
+
+Those numbers *are* the edge. Publishing them would hand the result of months of compute to anyone who copies the file — and turn a private signal into a crowded one. They live in the private repo, and they stay there.
+
+Also withheld: the full strategy source, ~640 tests, the dashboard implementation, real trade history, the internal project brain, and roughly two years of accumulated tuning notes.
 
 This page is the trailer. The film is private.
 
