@@ -272,7 +272,7 @@ The full project is private. This showcase exists to demonstrate the architectur
 ## Contact
 
 - GitHub: [@last-26](https://github.com/last-26)
-- Portfolio: [your portfolio URL]
+- Portfolio: [last-26.web.app](https://last-26.web.app/)
 
 ---
 
