@@ -1,101 +1,175 @@
+<div align="center">
+
 # SMTbot
 
-**An AI-driven crypto futures scalper, running 24/7 on Bybit V5.**
+**Private trading system. Public engineering showcase.**
 
-> Showcase repo. Full source is private — this page documents the architecture and shares one engineering story worth telling.
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Exchange](https://img.shields.io/badge/Bybit-V5-F7A600?logo=bitcoin&logoColor=white)](https://www.bybit.com/)
+[![Runtime](https://img.shields.io/badge/runtime-asyncio-22C55E)](#system-poster)
+[![Data](https://img.shields.io/badge/data-WebSocket-2962FF)](#system-poster)
+[![Storage](https://img.shields.io/badge/storage-SQLite-003B57?logo=sqlite&logoColor=white)](#operator-surface)
+[![Scope](https://img.shields.io/badge/source-private-111827)](#showcase-boundary)
+
+</div>
 
 ---
 
-## The headline number
+<table>
+  <tr>
+    <td align="center"><b>~24 ms</b><br/>steady cycle<br/><sub>10 symbols x 4 TFs</sub></td>
+    <td align="center"><b>~2500x</b><br/>cycle headroom<br/><sub>inside a 1m budget</sub></td>
+    <td align="center"><b>63</b><br/>test files<br/><sub>~975 pytest cases</sub></td>
+    <td align="center"><b>0 GUI</b><br/>headless runtime<br/><sub>Bybit-native pipeline</sub></td>
+  </tr>
+</table>
 
-**Cycle latency: ~160 s → ~24 ms.**
+SMTbot is a private crypto futures research bot. This repository is the trailer:
+it shows the architecture, operating surface, and engineering direction without
+publishing the strategy source, tuned parameters, or trade history.
 
-That's a **~6700× speedup**, achieved by rewriting the data layer from a TradingView desktop scraper into a native Bybit V5 WebSocket pipeline. The bot now runs headless on any Linux box, scans 25 pairs in parallel, and reacts to a closed bar in the time it takes to blink.
-
----
-
-## Architecture
+## System Poster
 
 ```mermaid
-flowchart TD
-    WS["Bybit V5 WebSocket"]
-    WS -->|"kline.{1,3,5,15}.SYMBOL"| WSC["BybitWSClient"]
-    WSC --> KB["KlineBuffer<br/>(per-symbol deque + gap-fill)"]
-    WSC --> CS["CycleScheduler<br/>(1m closed-bar dispatch + heartbeat)"]
-    KB --> MSB["MarketStateBuilder"]
-    MSB --> PE["PineEmulator<br/>(HA + WT + MFI + EMA200 + VWAP)"]
-    PE --> MS["MarketState"]
-    CS --> RUN["BotRunner._run_one_symbol"]
-    MS --> RUN
-    RUN --> EVAL["evaluate_entry()<br/>cascade dispatch"]
-    EVAL -->|Path 1| P1["cross_based"]
-    EVAL -->|Path 2| P2["pre_cross"]
-    EVAL -->|Path 3| P3["ha_reversal"]
-    P1 --> DEC{"TAKE / NO_SETUP / REJECT"}
-    P2 --> DEC
-    P3 --> DEC
-    DEC -->|TAKE| OR["Order Router"]
-    OR --> REST["Bybit V5 REST"]
-    RUN --> JNL[("SQLite Journal")]
-    DASH["FastAPI Dashboard"] -.->|read| JNL
+flowchart LR
+    subgraph EX["Bybit V5"]
+        WS["WebSocket<br/>closed klines"]
+        REST["REST<br/>orders + positions"]
+    end
 
-    style WS fill:#1a1d23,color:#e0e0e0
-    style REST fill:#1a1d23,color:#e0e0e0
-    style PE fill:#2d4a7a,color:#fff
-    style EVAL fill:#7a4a2d,color:#fff
-    style DEC fill:#4a7a2d,color:#fff
+    subgraph DATA["Market Data"]
+        WSC["WS client"]
+        BUF["Kline buffer"]
+        STATE["Market state builder<br/>indicators + PA context"]
+    end
+
+    subgraph CORE["Private Core"]
+        PA["Price-action / Wyckoff engine"]
+        RANK["Candidate ranking"]
+        THESIS["Trade thesis"]
+    end
+
+    subgraph RISK["Risk Authority"]
+        SIZE["Position sizing"]
+        GUARD["Circuit breakers"]
+        LIFE["Lifecycle rules"]
+    end
+
+    subgraph OPS["Operator Surface"]
+        EXEC["Order router"]
+        DB[("SQLite journal")]
+        DASH["FastAPI dashboard"]
+        REPORT["Reports + diagnostics"]
+    end
+
+    WS --> WSC --> BUF --> STATE
+    STATE --> PA --> RANK --> THESIS
+    THESIS --> SIZE --> GUARD --> LIFE --> EXEC --> REST
+    EXEC --> DB --> DASH
+    DB --> REPORT
+
+    classDef exchange fill:#111827,stroke:#F7A600,color:#F9FAFB
+    classDef data fill:#0F172A,stroke:#38BDF8,color:#F8FAFC
+    classDef core fill:#1E1B4B,stroke:#A78BFA,color:#F5F3FF
+    classDef risk fill:#14532D,stroke:#86EFAC,color:#F0FDF4
+    classDef ops fill:#1F2937,stroke:#9CA3AF,color:#F9FAFB
+
+    class WS,REST exchange
+    class WSC,BUF,STATE data
+    class PA,RANK,THESIS core
+    class SIZE,GUARD,LIFE risk
+    class EXEC,DB,DASH,REPORT ops
 ```
 
-Event-driven from the bar boundary down to the order placement. No polling, no GUI.
+## Live Cycle
+
+```mermaid
+sequenceDiagram
+    participant WS as Bybit WS
+    participant State as MarketState
+    participant Core as Private Core
+    participant Risk as Risk Authority
+    participant Ex as Bybit REST
+    participant DB as Journal
+
+    WS->>State: closed-bar event
+    State->>Core: multi-timeframe context
+    Core->>Risk: TradePlan or NO_TRADE
+    alt approved thesis
+        Risk->>Ex: passive entry + attached protection
+        Ex-->>DB: fills, positions, close history
+        DB-->>Risk: reconciliation + lifecycle state
+    else no setup
+        Core-->>DB: decision audit
+    end
+```
+
+## Current Shape
+
+| Surface | What it demonstrates |
+| --- | --- |
+| **Data plane** | Bybit V5 WebSocket ingestion, closed-candle discipline, in-process indicator recompute |
+| **Analysis plane** | Price action, Wyckoff context, liquidity, market structure, S/R, FVG, order blocks, regime context |
+| **Execution plane** | Passive entries, structural invalidation, final target management, exchange reconciliation |
+| **Risk plane** | Position sizing, portfolio guards, circuit breakers, MFE stop-lock lifecycle |
+| **Ops plane** | Async SQLite journal, read-only dashboard, diagnostics, repair scripts, run reports |
+
+## Engineering Story
+
+```mermaid
+flowchart LR
+    A["Legacy path<br/>TradingView desktop<br/>browser automation<br/>table scraping<br/><b>~160 s cycle</b>"] --> B["Cutover"]
+    B --> C["Native path<br/>Bybit WS<br/>Python state engine<br/>headless runtime<br/><b>~24 ms cycle</b>"]
+    C --> D["Current research layer<br/>PA / Wyckoff thesis<br/>portfolio authority<br/>MFE stop-locks"]
+```
+
+The important move was not only speed. It was ownership of the whole trading
+loop: market data, state building, decision audit, order lifecycle, and operator
+visibility now live in one Python runtime.
+
+## Showcase Boundary
+
+| Public in this repo | Private in SMTbot |
+| --- | --- |
+| Architecture poster | Strategy source |
+| Runtime model | Tuned thresholds and weights |
+| Performance shape | Per-symbol risk parameters |
+| Module map | Backtest corpus and optimization output |
+| Engineering narrative | Real trade history and operator notes |
+
+## Operator Surface
+
+```mermaid
+flowchart TB
+    RUN["Bot runner"] --> J[("SQLite journal")]
+    RUN --> R["Run reports"]
+    J --> D["Dashboard"]
+    J --> A["Accounting reconciliation"]
+    J --> M["MFE / MAE tracking"]
+    A --> H{"Trusted?"}
+    H -->|yes| K["KPIs"]
+    H -->|no| W["PNL_UNTRUSTED warning"]
+```
+
+## Stack Snapshot
+
+```text
+Python 3.11+      asyncio, pydantic, loguru
+Bybit V5          pybit, websockets, httpx
+Data/analysis     pandas, numpy, ta
+Persistence       aiosqlite
+Dashboard         FastAPI, uvicorn
+Validation        pytest, diagnostics, smoke tests
+```
 
 ---
 
-## Stack
+<div align="center">
 
-| | |
-|---|---|
-| **Language** | Python 3.11+, fully async (`asyncio`) |
-| **Exchange** | Bybit V5 (UTA, hedge mode, USDT perps) via `pybit` |
-| **Indicators** | Pine v6 emulator (HA, WaveTrend, MFI, EMA200, VWAP) — bit-perfect parity |
-| **Storage** | SQLite (`aiosqlite`) — trades, decision log, position snapshots |
-| **Tuning** | `optuna` (TPE + CMA-ES) over walk-forward backtests |
-| **Dashboard** | FastAPI + vanilla HTML, 5 s poll, live PnL ledger |
-| **Tests** | ~640 `pytest` cases — strategy, data pipeline, journal, execution |
+**SMTbot-Demo is intentionally non-copyable.**
 
----
+Enough signal to understand the engineering, not enough to clone the edge.
 
-## The strategy in one breath
+[@last-26](https://github.com/last-26) | [last-26.web.app](https://last-26.web.app/)
 
-A mean-reversion entry that fires at the moment a trend exhausts: WaveTrend cross + Heikin Ashi color flip + a multi-timeframe soft factor stack.
-
-**Three cascade entry paths.** If the primary path doesn't fire, the bot falls through to a slope-based pre-cross detector, then to a fast HA-reversal detector. Each path runs the same scoring engine against direction-aligned signals on 5 m + 15 m + 3 m timeframes plus a BTC/ETH composite bias.
-
-**A single exit doctrine.** Position-attached SL, post-only reduce-only TP limit, and an idempotent break-even lock that fires the moment unrealized P&L crosses a threshold — even if the cycle is mid-flight.
-
-The tuned thresholds, weights, RR multiples, and per-symbol risk parameters live in the private repo.
-
----
-
-## The Bybit V5 cutover — a short story
-
-The bot's first data layer was a chain of indirection: TradingView Desktop → Electron CDP → Node.js MCP daemon → Python bridge → cell-by-cell signal-table parser. It worked, but it pinned the bot to a Windows machine with TV open, serial-swept 15 symbols in ~160 seconds, and made the strategy think in 5-minute cadence because polling faster was impractical.
-
-A two-day rewrite replaced the entire chain with a Bybit V5 WebSocket subscription + a Python-native Pine v6 emulator. The hard part was parity: a single off-by-one in the HA streak counter or a wrong sign in WaveTrend would silently change every entry decision. A diagnostic script diffed every signal cell between the old and new pipelines — **10/10 bit-perfect** on the first clean build.
-
-The post-cutover backtest cohort matched the pre-cutover cohort within ±0.01R per trade. No regression. The forward-test on 25 pairs began the same day.
-
----
-
-## What's not in this repo
-
-**The tuned weights.** Six months of historical OHLCV across 25 pairs, fed through a walk-forward backtest harness, then put through a two-stage tuning pipeline — TPE for the wide search, CMA-ES for the refinement. The output is the set of numbers that actually drive the bot: the RR multiple, the per-symbol SL percentage, the soft factor weights, the score threshold, the BTC/ETH composite bias coefficients.
-
-Those numbers *are* the edge. Publishing them would hand the result of months of compute to anyone who copies the file — and turn a private signal into a crowded one. They live in the private repo, and they stay there.
-
-Also withheld: the full strategy source, ~640 tests, the dashboard implementation, real trade history, the internal project brain, and roughly two years of accumulated tuning notes.
-
-This page is the trailer. The film is private.
-
----
-
-**[@last-26](https://github.com/last-26)** · [last-26.web.app](https://last-26.web.app/)
+</div>
